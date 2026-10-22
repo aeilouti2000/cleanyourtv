@@ -35,6 +35,12 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         edge.setColor(translucent ? 0x26FFFFFF : 0x1FFFFFFF);
     }
 
+    /** Live theme colours for the dock shelf band. */
+    void setPalette(int bandColor, int edgeColor) {
+        band.setColor(bandColor);
+        edge.setColor(edgeColor);
+    }
+
     @Override
     public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent,
                                @NonNull RecyclerView.State state) {
@@ -68,9 +74,6 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         }
         if (!any) return;
         float pad = 14 * density;
-        // The band can only draw inside the grid, and the first and last dock tiles sit 12dp in from its
-        // edges: a full 14dp at the sides sliced the rounded ends flat (#454). Keep the sides, with the
-        // 1dp edge line, inside the grid; the top and bottom have room.
         float side = Math.max(0f, Math.min(pad, Math.min(rect.left, parent.getWidth() - rect.right) - density));
         rect.inset(-side, -pad);
         rect.bottom += namesRoom;

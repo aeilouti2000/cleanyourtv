@@ -11,8 +11,12 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
@@ -53,6 +57,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
         /** Called for a D-pad direction key on a tile. Return true when handled (focus stays put). */
         boolean onTileVerticalKey(int position, int keyCode);
+
+        /** Long-press on a dock tile: open dock edit menu. Return true when handled. */
+        boolean onDockLongPress(int position, String pkg, String label);
 
         void onLibraryRequested();
         void onLibraryFocused();
@@ -131,8 +138,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     static final float ITEM_EXTRA_DP = 45;
     /** DockDecoration's offsets above and below the dock row. */
     static final float DOCK_EXTRA_DP = 6 + 12;
-    /** Room kept under the last row rows_below_dock asks for (MainActivity places the dock with the same). */
-    static final float BOTTOM_ROOM_DP = 30;
+    /** Room kept under the dock (MainActivity places the dock with the same). Small gap above the screen edge. */
+    static final float BOTTOM_ROOM_DP = 20;
     /** Room kept above the dock for the dock title (48sp hero name plus its 40dp gap) when dock_title is on. */
     static final float TITLE_ROOM_DP = 104;
     /** dock_row false: room above the first row for its zoom and glass (MainActivity places the grid with it). */
@@ -178,8 +185,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final float restNameAlpha;
     /** cinematic_home: only then does a launch record the last-opened app the shelf uses. */
     private final boolean cinematic;
-    /** Dock order (config.xml dock_apps, or a theme's config.json). */
-    private final List<String> favourites;
+    /** Dock order (config.xml dock_apps, theme, or DockPrefs). Mutable so the owner can edit the bar. */
+    private List<String> favourites;
     /** Grid apps fill the dock slots dock_apps leaves free (config.xml, fill_dock). */
     private final boolean fillDock;
     /** Dock apps found at the last reload, and the empty slots after them. */
@@ -199,12 +206,17 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Tile names and bundled banners that replace the app's own (config.xml, app_labels and app_banners). */
     private final Map<String, String> appLabels, appBanners;
     private final List<Entry> items = new ArrayList<>();
+    /** Visual theme icon presentation (ThemePrefs). */
+    private VisualTheme.IconStyle iconStyle = VisualTheme.IconStyle.ORIGINAL;
+    private VisualTheme visualTheme = VisualTheme.ALL[0];
+    /** Lightweight focus motion for TV remotes (short scale, no overshoot). */
+    private boolean snappyFocus = true;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
         this.listener = listener;
         this.dockSize = dockSize;
-        this.favourites = cfg.dockApps;
+        this.favourites = new ArrayList<>(cfg.dockApps);
         this.fillDock = cfg.fillDock;
         this.hidden = new HashSet<>(cfg.hiddenApps);
         this.animations = cfg.animations;
@@ -268,9 +280,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             if (!seen.add(pkg + '\n' + label)) continue;
             Drawable banner = bundledBanner(appBanners.get(pkg));
             if (banner == null) banner = loadBanner(pm, ri);
-            // The icon is only drawn (and sampled for the glow) when there is no banner, so a tile with a
-            // banner skips loading and decoding it.
-            Drawable icon = banner == null ? ri.loadIcon(pm) : null;
+            // Always keep the launcher icon: themed styles need the real logo (banners are wide artwork).
+            Drawable icon = ri.loadIcon(pm);
             if (card != null) {
                 fresh.add(new Entry(Entry.CARD, label, component, banner, icon, card.caption, card.accent));
             } else {
@@ -387,7 +398,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             v.setPadding(v.getPaddingLeft(), pad, v.getPaddingRight(), pad);
         }
         name.setLayoutParams(nameLp);
-        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha);
+        return new Holder(v, listener, animations, advancedEffects, reducedMotion || snappyFocus, restNameAlpha, snappyFocus);
     }
 
     @Override
@@ -415,29 +426,84 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         h.name.setAlpha(focused ? 1f : restNameAlpha);
         h.card.setScaleX(focused && animations ? focusScale() : 1f);
         h.card.setScaleY(focused && animations ? focusScale() : 1f);
-        h.card.setTranslationY(focused && advancedEffects ? -4f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.banner.setScaleX(focused && advancedEffects ? 1.035f : 1f);
-        h.banner.setScaleY(focused && advancedEffects ? 1.035f : 1f);
-        // A fully opaque banner covers the whole card (centerCrop), so the card's own fill under it is drawn for
-        // nothing on every frame; keep it under banners with transparent parts and under icon tiles.
-        h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE ? null : h.cardBackground);
-        if (e.banner != null) {
-            h.banner.setImageDrawable(e.banner);
-            h.banner.setVisibility(View.VISIBLE);
-            h.icon.setVisibility(View.GONE);
-            h.label.setVisibility(View.GONE);
+        // Snappy focus: no lift / Z / banner zoom — keeps D-pad navigation immediate.
+        h.card.setTranslationY(0f);
+        h.card.setTranslationZ(0f);
+        h.banner.setScaleX(1f);
+        h.banner.setScaleY(1f);
+        float dens = ctx.getResources().getDisplayMetrics().density;
+        h.banner.clearColorFilter();
+        h.icon.clearColorFilter();
+        h.banner.setScaleType(ImageView.ScaleType.CENTER_CROP);
+
+        if (iconStyle == VisualTheme.IconStyle.ORIGINAL) {
+            // Stock launcher behaviour: opaque banner fills the card; otherwise icon + label.
+            h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE
+                    ? null : h.cardBackground);
+            if (e.banner != null) {
+                h.banner.setImageDrawable(e.banner);
+                h.banner.setVisibility(View.VISIBLE);
+                h.icon.setVisibility(View.GONE);
+                h.label.setVisibility(View.GONE);
+            } else {
+                h.banner.setImageDrawable(null);
+                h.banner.setVisibility(View.GONE);
+                h.icon.setImageDrawable(e.icon);
+                h.icon.setVisibility(View.VISIBLE);
+                h.label.setText(e.label);
+                h.label.setVisibility(View.VISIBLE);
+            }
         } else {
-            h.banner.setImageDrawable(null);
-            h.banner.setVisibility(View.GONE);
-            h.icon.setImageDrawable(e.icon);
-            h.icon.setVisibility(View.VISIBLE);
-            h.label.setText(e.label);
-            h.label.setVisibility(View.VISIBLE);
+            // Custom styles: themed card plate + real launcher icon (fitCenter, correct aspect).
+            // Prefer the app icon — TV banners are wide artwork and must not be stretched into the logo.
+            h.card.setBackground(ThemeDrawables.tilePlate(visualTheme, iconStyle, dens, focused));
+            int tileW = Math.max(1, h.card.getLayoutParams() != null
+                    ? h.card.getLayoutParams().width : Math.round(DESIGN_W_DP * dens));
+            int tileH = Math.max(1, h.card.getLayoutParams() != null
+                    ? h.card.getLayoutParams().height : tileHeightPx(tileW));
+            Drawable logo = e.icon;
+            if (logo == null) logo = e.banner;
+            Drawable themed = ThemedIcons.present(e.pkg, logo, visualTheme, iconStyle, tileW, tileH);
+            if (themed != null) {
+                // Composed to exact tile size with transparent padding — no stretch.
+                h.banner.setScaleType(ImageView.ScaleType.FIT_XY);
+                h.banner.setImageDrawable(themed);
+                h.banner.setVisibility(View.VISIBLE);
+                h.icon.setVisibility(View.GONE);
+                h.label.setVisibility(View.GONE);
+            } else if (e.icon != null) {
+                // Fallback: original icon centred on the plate (enlarge past the 48dp label slot).
+                h.banner.setImageDrawable(null);
+                h.banner.setVisibility(View.GONE);
+                ViewGroup.LayoutParams ilp = h.icon.getLayoutParams();
+                int iconEdge = Math.round(Math.min(tileW, tileH) * 0.78f);
+                ilp.width = iconEdge;
+                ilp.height = iconEdge;
+                if (ilp instanceof ViewGroup.MarginLayoutParams) {
+                    ((ViewGroup.MarginLayoutParams) ilp).bottomMargin = 0;
+                }
+                h.icon.setLayoutParams(ilp);
+                h.icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                h.icon.setImageDrawable(e.icon);
+                h.icon.setVisibility(View.VISIBLE);
+                h.label.setVisibility(View.GONE);
+            } else if (e.banner != null) {
+                h.banner.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                h.banner.setImageDrawable(e.banner);
+                h.banner.setVisibility(View.VISIBLE);
+                h.icon.setVisibility(View.GONE);
+                h.label.setVisibility(View.GONE);
+            }
         }
         h.card.setOnClickListener(v -> launch(e));
+        final int bindPos = position;
+        final Entry bindEntry = e;
         h.card.setOnLongClickListener(v -> {
-            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
+            if (dockRow && bindPos < dockSize && bindEntry.kind == Entry.APP
+                    && listener.onDockLongPress(bindPos, bindEntry.pkg, bindEntry.label)) {
+                return true;
+            }
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + bindEntry.pkg));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
                 ctx.startActivity(i);
@@ -445,6 +511,22 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             }
             return true;
         });
+    }
+
+    /** Replace the dock favourites list and rebuild (after DockPrefs save). */
+    void setFavourites(List<String> packages) {
+        favourites = new ArrayList<>(packages);
+    }
+
+    void setIconPresentation(VisualTheme theme, VisualTheme.IconStyle style) {
+        visualTheme = theme != null ? theme : VisualTheme.ALL[0];
+        iconStyle = style != null ? style : VisualTheme.IconStyle.ORIGINAL;
+        ThemedIcons.clearCache();
+        notifyDataSetChanged();
+    }
+
+    void setSnappyFocus(boolean snappy) {
+        snappyFocus = snappy;
     }
 
     /** Opens the tile's activity by explicit component, with no extras: a card can name nothing else. */
@@ -580,7 +662,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     float focusScale() {
-        return !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+        if (!animations) return 1f;
+        if (snappyFocus) return 1.04f;
+        return advancedEffects ? 1.12f : 1.10f;
     }
 
     /** A vivid colour sampled from the app's banner (or icon), cached per entry; a card's accent when it set one. */
@@ -652,11 +736,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         final boolean animations;
         final boolean advancedEffects;
         final boolean reducedMotion;
+        final boolean snappyFocus;
         /** Alpha of the name while the tile is not focused (always_show_names). */
         final float restNameAlpha;
 
         Holder(View v, TileListener listener, boolean animations, boolean advancedEffects,
-               boolean reducedMotion, float restNameAlpha) {
+               boolean reducedMotion, float restNameAlpha, boolean snappyFocus) {
             super(v);
             card = v.findViewById(R.id.card);
             cardBackground = card.getBackground();
@@ -667,6 +752,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             this.animations = animations;
             this.advancedEffects = advancedEffects;
             this.reducedMotion = reducedMotion;
+            this.snappyFocus = snappyFocus;
             this.restNameAlpha = restNameAlpha;
 
             final float density = v.getResources().getDisplayMetrics().density;
@@ -691,7 +777,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 view.animate().cancel();
                 banner.animate().cancel();
                 name.animate().cancel();
-                float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+                float scale = !animations ? 1f : snappyFocus ? 1.04f : advancedEffects ? 1.12f : 1.10f;
                 float s = focused ? scale : 1f;
                 if (!animations) {
                     view.setScaleX(1f);
@@ -702,17 +788,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                     banner.setScaleY(1f);
                     name.setAlpha(focused ? 1f : restNameAlpha);
                     name.setTranslationY(0f);
-                } else if (reducedMotion) {
+                } else if (snappyFocus || reducedMotion) {
+                    // Short, immediate focus for TV remotes — no overshoot, no Z lift, no banner zoom.
                     view.animate().scaleX(s).scaleY(s)
-                            .translationY(focused && advancedEffects ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
-                            .setDuration(focused ? 120 : 80)
+                            .translationY(0f).translationZ(0f)
+                            .setDuration(focused ? 130 : 100)
                             .setInterpolator(new DecelerateInterpolator())
                             .withLayer().start();
                     name.animate().alpha(focused ? 1f : restNameAlpha).setDuration(100).start();
-                    // Same place as the full motion's slide ends: the layout's -6dp is only its starting point, and
-                    // left there the name overlaps the zoomed tile.
-                    // Only on focus: snapping it back to -6dp while it fades out would jump it up over the tile.
                     if (focused) name.setTranslationY(density * 4f);
                 } else {
                     view.animate().scaleX(s).scaleY(s)

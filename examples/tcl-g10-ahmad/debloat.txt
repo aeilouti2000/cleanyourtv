@@ -1,0 +1,63 @@
+# TCL G10 Google TV — Ahmad (G10_4K_GB_NF_32BIT, STT2.230203.001)
+# Based on examples/tcl-g10-google-tv/debloat.txt with owner preferences.
+#
+# KEEP: Google Assistant (katniss), phone remote (tv.remote.service),
+#       Netflix, YouTube, SmartTube, Shahid, TOD, games, Live TV (com.tcl.tv).
+# DISABLE: Chromecast, Miracast, AirPlay, Alexa, unused streamers, TCL ads.
+# Left alone: system OTA / firmware updates (safer).
+#
+# Apply:  TV_HOST=192.168.1.13 tools/disable.sh examples/tcl-g10-ahmad/debloat.txt
+# Undo:   TV_HOST=192.168.1.13 tools/restore.sh examples/tcl-g10-ahmad/debloat.txt com.google.android.apps.tv.launcherx
+#
+# Stock launcher: com.google.android.apps.tv.launcherx
+# Also disable setupwraith when installing custom Home (build-and-install does this).
+
+# --- Batch A: TCL content / ads / promos ---
+com.tcl.channelplus
+com.tcl.tv.tclhome_passive
+com.tcl.partnercustomizer
+com.tcl.interactive
+com.tcl.smartlink.core
+com.tcl.waterfall.overseas
+com.tcl.messagebox
+com.tcl.usercenter
+com.tcl.useragreement
+com.tcl.hotelmenu
+com.tcl.t_solo
+com.tcl.hearaid
+com.tcl.magiconnectfree
+com.tcl.providers.config
+
+# --- Batch B: retail / manuals / unused TCL ---
+com.tcl.exhibit
+com.tcl.esticker
+com.tcl.ocean.instructions
+com.tcl.repairguide
+com.tcl.gamebar
+com.tcl.ui_mediaCenter
+com.tcl.UpdatePeripheral
+com.tcl.smartalexa
+
+# --- Batch C: Google extras (keep Assistant + phone remote) ---
+android.autoinstalls.config.google.gtvpai
+com.google.android.feedback
+com.google.android.marvin.talkback
+# Keep Ambient Mode screensaver (dreamx Backdrop) — restored at user request.
+# com.google.android.apps.tv.dreamx
+com.google.android.partnersetup
+com.google.android.play.games
+com.google.android.syncadapters.calendar
+
+# --- Batch D: cast / AirPlay / Miracast (user does not use) ---
+com.google.android.apps.mediashell
+com.tcl.miracast
+com.tcl.airplay2
+com.realtek.airplay2
+
+# --- Batch E: unused streaming / apps ---
+com.disneyplus.mea
+com.osn.go
+com.iqiyi.i18n.tv
+tv.smartiptv.onlineplayer
+com.google.android.videos
+com.google.android.youtube.tvmusic

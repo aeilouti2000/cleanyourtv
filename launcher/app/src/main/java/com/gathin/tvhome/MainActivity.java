@@ -61,6 +61,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -151,6 +152,28 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean pillsShown;
     private TextView shamsiDate;
     private TextView stats;
+    private TextView prayerTitle;
+    private TextView prayerCountdown;
+    private TextView weatherTitle;
+    private TextView weatherTemp;
+    private TextView weatherDesc;
+    private View prayerCard;
+    private View weatherCard;
+    private View[] prayerSlotRoots;
+    private TextView[] prayerSlotTimes;
+    private TextView[] prayerSlotLabels;
+    private WeatherAmman weatherAmman;
+    private JordanPrefs jordanPrefs;
+    private int prayerAccent = 0xFFE8B86D;
+    private static final int PRAYER_TIME = 0xFFFFFFFF;
+    private static final int PRAYER_LABEL = 0x8CFFFFFF;
+    private ThemeBackdropView themeBackdrop;
+    private View btnThemes;
+    private VisualTheme visualTheme = VisualTheme.ALL[0];
+    private VisualTheme.IconStyle iconStyle = VisualTheme.IconStyle.ORIGINAL;
+    private DockDecoration dockDecoration;
+    private TextView ampmClock;
+    private TextView dateClock;
     private List<RaceWeekend.Race> raceCalendar;
     private View racePanel;
     private TextView raceKicker, raceHeadline, raceSessions;
@@ -182,6 +205,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** config settings_key_keycodes / settings_key_panel, so the Settings button works on Home without HomeKeyService. */
     private int[] settingsKeycodes = new int[0];
     private boolean settingsKeyPanel;
+    /** config app_keys: remote app buttons (YouTube → SmartTube) while Home is focused; InputKeyService covers other apps. */
+    private Map<Integer, String> appKeys = Collections.emptyMap();
+    private Map<Integer, String> appScancodes = Collections.emptyMap();
     /** Calmer motion for weak GPUs (config.xml, reduced_motion): stiff spring, short fades, no replay. */
     private boolean reducedMotion;
     /** config.xml dock_row: the first row is a separate dock (band, parked low, top shelf) rather than plain grid. */
@@ -291,6 +317,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         public void run() {
             updateGreeting();
             updateRace();
+            updateJordanStrip();
             updateWifiLabel();
             sky.update();
             wallpaperPlayer.update();
@@ -307,6 +334,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         Config cfg = Config.load(this);
         settingsKeycodes = cfg.settingsKeycodes;
         settingsKeyPanel = cfg.settingsKeyPanel;
+        appKeys = RemoteKeys.parseAppKeys(cfg.appKeys);
+        appScancodes = RemoteKeys.parseAppScancodes(cfg.appKeys);
         COLUMNS = cfg.columns;
         animations = cfg.animations;
         advancedEffects = cfg.animations && cfg.advancedEffects;
@@ -328,10 +357,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // the theme's background, so launch looks the same.
         getWindow().setBackgroundDrawable(null);
         wallpaperPlayer = new WallpaperPlayer(this, root, cfg);
+        themeBackdrop = findViewById(R.id.themeBackdrop);
+        visualTheme = ThemePrefs.load(this);
+        iconStyle = ThemePrefs.loadIconStyle(this);
         sky = findViewById(R.id.sky);
         sky.setIntensity(cfg.skyIntensity);
         glass = findViewById(R.id.glass);
         if (festive) glass.setAccent(festival.accentColor());
+        ampmClock = findViewById(R.id.ampm);
+        dateClock = findViewById(R.id.date);
         ambient = findViewById(R.id.ambient);
         // The glow is one bitmap, so its alpha can be applied while drawing it. Otherwise every frame of
         // a fade renders it into a full-screen offscreen buffer first.
@@ -357,6 +391,36 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnWifi = findViewById(R.id.btnWifi);
         shamsiDate = findViewById(R.id.shamsiDate);
         stats = findViewById(R.id.stats);
+        jordanPrefs = new JordanPrefs(this);
+        prayerCard = findViewById(R.id.prayerCard);
+        weatherCard = findViewById(R.id.weatherCard);
+        prayerTitle = findViewById(R.id.prayerTitle);
+        prayerCountdown = findViewById(R.id.prayerCountdown);
+        weatherTitle = findViewById(R.id.weatherTitle);
+        weatherTemp = findViewById(R.id.weatherTemp);
+        weatherDesc = findViewById(R.id.weatherDesc);
+        int[] slotIds = {R.id.slotFajr, R.id.slotDhuhr, R.id.slotAsr, R.id.slotMaghrib, R.id.slotIsha};
+        prayerSlotRoots = new View[slotIds.length];
+        prayerSlotTimes = new TextView[slotIds.length];
+        prayerSlotLabels = new TextView[slotIds.length];
+        for (int i = 0; i < slotIds.length; i++) {
+            View root = findViewById(slotIds[i]);
+            prayerSlotRoots[i] = root;
+            prayerSlotTimes[i] = root.findViewById(R.id.slotTime);
+            prayerSlotLabels[i] = root.findViewById(R.id.slotLabel);
+        }
+        weatherAmman = new WeatherAmman();
+        prayerCard.setOnClickListener(v -> showPrayerSettings());
+        weatherCard.setOnClickListener(v -> showWeatherCityPicker());
+        // D-pad OK on a focused card (same as a click).
+        View.OnKeyListener cardOk = (v, code, event) -> {
+            if (code != KeyEvent.KEYCODE_DPAD_CENTER && code != KeyEvent.KEYCODE_ENTER) return false;
+            if (event.getAction() != KeyEvent.ACTION_UP || event.isCanceled()) return true;
+            v.performClick();
+            return true;
+        };
+        prayerCard.setOnKeyListener(cardOk);
+        weatherCard.setOnKeyListener(cardOk);
         raceCalendar = cfg.raceCalendar;
         racePanel = findViewById(R.id.racePanel);
         raceKicker = findViewById(R.id.raceKicker);
@@ -367,10 +431,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         greetingName = cfg.greetingName;
         if (shamsi) {
             shamsiDate.setVisibility(View.VISIBLE);
-            TextView date = findViewById(R.id.date);
-            date.setTextSize(11f);
-            date.setPadding(0, (int) (4 * density), 0, 0);
         }
+        updateArabicWeekday();
         vpnApp = cfg.vpnApp;
         moduleCards = cfg.moduleCards;
         hiddenApps = new HashSet<>(cfg.hiddenApps);
@@ -431,7 +493,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             public void onChildViewDetachedFromWindow(@NonNull View v) {
             }
         });
-        if (dockRow) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames));
+        if (dockRow) {
+            dockDecoration = new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames);
+            grid.addItemDecoration(dockDecoration);
+        }
         if (animations) {
             int enterAnim = reducedMotion ? R.anim.tile_enter_reduced : R.anim.tile_enter;
             float enterDelay = reducedMotion ? 0f : 0.06f;
@@ -439,7 +504,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     AnimationUtils.loadAnimation(this, enterAnim), enterDelay));
         }
         adapter = new AppAdapter(this, this, COLUMNS, cfg);
-        dockApps = cfg.dockApps;
+        adapter.setSnappyFocus(true);
+        adapter.setIconPresentation(visualTheme, iconStyle);
+        dockApps = DockPrefs.load(this, cfg.dockApps);
+        adapter.setFavourites(dockApps);
         fillDockLeavesSlots = !cfg.fillDock;
         adapter.setSavedOrder(Order.ranks(Order.load(Order.file(this)), dockApps));
         grid.setAdapter(adapter);
@@ -458,14 +526,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // Keep the hero below the header when the library is enabled on a short screen,
             // even when the theme requests an extra visible row below the dock.
             int shelfClearance = cfg.appLibrary ? hero.getMeasuredHeight() + (int) (40 * density) : 0;
-            int want = Math.max(shelfClearance, h - dockRow - gridRows - (int) (AppAdapter.BOTTOM_ROOM_DP * density));
+            // Dock tiles hide their name labels unless always_show_names; that unused name strip
+            // (gap + 22dp) plus decoration inset would otherwise leave a blank band under the dock.
+            // Pull the row down, but leave BOTTOM_ROOM so a few pixels stay above the screen edge.
+            int hiddenNameSlack = (MainActivity.this.dockRow && !cfg.alwaysShowNames)
+                    ? (int) (40 * density) : 0;
+            int bottomPad = Math.min(grid.getPaddingBottom(), (int) (8 * density));
+            int want = Math.max(shelfClearance,
+                    h - dockRow - gridRows - bottomPad - (int) (AppAdapter.BOTTOM_ROOM_DP * density) + hiddenNameSlack);
             // Where the rows cannot fit even at the smallest tile (3 rows with the title on), the title keeps its
             // room above the dock and the last rows run off the bottom instead of the title drawing over the clock.
             if (MainActivity.this.dockRow && cfg.dockTitle && rowsBelowDock > 0) want = Math.max(want, (int) (AppAdapter.TITLE_ROOM_DP * density));
             // No dock to push down: the grid starts at the top, with room for the first row's zoom and glass.
             if (!MainActivity.this.dockRow) want = (int) (AppAdapter.TOP_ROOM_DP * density);
             if (grid.getPaddingTop() != want) {
-                grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
+                grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), bottomPad);
             }
             // Cold start or column count > 4: the first focus can run before the grid has its final width or
             // padding, leaving the glass at the XML design size until a key is pressed.
@@ -497,19 +572,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         });
         for (SpringAnimation s : new SpringAnimation[]{springX, springY}) {
-            if (reducedMotion) {
-                // Stiff and almost critically damped: settles in a few frames instead of oscillating,
-                // and stops once the highlight is within 1.5 px of its tile.
-                s.setSpring(new SpringForce().setStiffness(1400f).setDampingRatio(0.95f));
-                s.setMinimumVisibleChange(1.5f);
-            } else {
-                s.setSpring(new SpringForce().setStiffness(advancedEffects ? 320f : 260f)
-                        .setDampingRatio(advancedEffects ? 0.76f : 0.58f));
-            }
+            // Snappy glass: stiff spring so D-pad focus never lags behind the remote.
+            s.setSpring(new SpringForce().setStiffness(1200f).setDampingRatio(0.92f));
+            s.setMinimumVisibleChange(1.5f);
         }
 
         btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
+        btnThemes = findViewById(R.id.btnThemes);
         btnInputs.setOnClickListener(v -> showInputs());
         btnWifi.setOnClickListener(v -> openNetworkPill());
         btnWifi.setOnLongClickListener(v -> {
@@ -517,6 +587,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return true;
         });
         btnSettings.setOnClickListener(v -> open(systemIntent(Settings.ACTION_SETTINGS)));
+        btnThemes.setOnClickListener(v -> showThemePicker());
         btnReorder = findViewById(R.id.btnReorder);
         btnReorder.setOnClickListener(v -> toggleReorder());
         btnReorder.setVisibility(cfg.reorderButton ? View.VISIBLE : View.GONE);
@@ -533,6 +604,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (cfg.wifiLabelWidth > 0) btnWifi.setMaxWidth(Math.round(cfg.wifiLabelWidth * density));
             else makeIconOnly(btnWifi);
             makeIconOnly((TextView) btnSettings);
+            makeIconOnly((TextView) btnThemes);
         }
         btnSettings.setOnLongClickListener(v -> {
             showSettingsMenu();
@@ -558,17 +630,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         };
         btnInputs.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
+        btnThemes.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
         btnReorder.setOnKeyListener(pillKeys);
         btnLibraryTop.setOnKeyListener(pillKeys);
         if (advancedEffects) {
-            for (View button : new View[]{btnInputs, btnWifi, btnReorder, btnLibraryTop, btnSettings}) {
+            for (View button : new View[]{btnInputs, btnWifi, btnReorder, btnLibraryTop, btnThemes, btnSettings}) {
                 button.setOnFocusChangeListener((view, focused) -> view.animate()
                         .scaleX(focused ? 1.04f : 1f).scaleY(focused ? 1.04f : 1f)
                         .setDuration(160).start());
             }
         }
         if (festive) applyFestiveSkin((TextView) btnInputs, (TextView) btnSettings);
+        applyVisualTheme(visualTheme, false);
 
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
@@ -658,6 +732,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         rebuildOnResume = false;
         updateGreeting();
         updateRace();
+        updateJordanStrip();
         // The network and Inputs pills keep their state while Home is in the background, and callbacks update them
         // when the network or the inputs change, so this refresh only catches anything missed. Its binder calls
         // (about 7 ms on a TCL C755, most of it WifiManager.getConnectionInfo) would hold up the first frame back
@@ -847,6 +922,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (weatherAmman != null) weatherAmman.shutdown();
         wallpaperPlayer.close();
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
@@ -875,6 +951,118 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return false;
     }
 
+    /**
+     * Remote app buttons from app_keys (YouTube → SmartTube on this TCL). InputKeyService handles them
+     * system-wide when enabled; this covers the Home screen if that service is off after a reinstall.
+     */
+    private boolean handleAppKey(KeyEvent event) {
+        String pkg = appScancodes.get(event.getScanCode());
+        if (pkg == null) pkg = appKeys.get(event.getKeyCode());
+        if (pkg == null) return false;
+        if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+            RemoteKeys.launch(this, pkg);
+        }
+        return true;
+    }
+
+    // ---- visual themes --------------------------------------------------------------------------
+
+    private void showThemePicker() {
+        final VisualTheme before = visualTheme;
+        ThemePickerDialog.show(this, new ThemePickerDialog.Host() {
+            @Override
+            public void previewTheme(VisualTheme theme) {
+                applyVisualTheme(theme, false);
+            }
+
+            @Override
+            public void applyTheme(VisualTheme theme) {
+                ThemePrefs.save(MainActivity.this, theme);
+                applyVisualTheme(theme, true);
+            }
+
+            @Override
+            public void revertTheme() {
+                applyVisualTheme(ThemePrefs.load(MainActivity.this), false);
+            }
+
+            @Override
+            public VisualTheme currentTheme() {
+                return before;
+            }
+
+            @Override
+            public VisualTheme.IconStyle iconStyle() {
+                return iconStyle;
+            }
+
+            @Override
+            public void setIconStyle(VisualTheme.IconStyle style) {
+                iconStyle = style;
+                ThemePrefs.saveIconStyle(MainActivity.this, style);
+                if (adapter != null) adapter.setIconPresentation(visualTheme, style);
+            }
+
+            @Override
+            public boolean animateBackdrop() {
+                return ThemePrefs.animateBackdrop(MainActivity.this);
+            }
+
+            @Override
+            public void setAnimateBackdrop(boolean on) {
+                ThemePrefs.saveAnimateBackdrop(MainActivity.this, on);
+            }
+        });
+    }
+
+    /**
+     * Apply a visual theme live: backdrop, accents, cards, pills, glass, dock band, icon style.
+     * Does not touch dock order, prayer/weather data, or config.json.
+     */
+    private void applyVisualTheme(VisualTheme theme, boolean persistAlreadyDone) {
+        if (theme == null) theme = VisualTheme.ALL[0];
+        visualTheme = theme;
+        prayerAccent = theme.accent;
+        if (themeBackdrop != null) {
+            themeBackdrop.setTheme(theme, ThemePrefs.animateBackdrop(this));
+            themeBackdrop.setVisibility(View.VISIBLE);
+        }
+        // Prefer the visual theme backdrop over the built-in sky when sky is unused.
+        if (sky != null && sky.getVisibility() != View.GONE) {
+            // Keep sky if the owner enabled it; otherwise the theme backdrop fills the role.
+        }
+        if (root != null) root.setBackgroundColor(theme.background);
+        if (ampmClock != null) ampmClock.setTextColor(theme.amPm);
+        if (dateClock != null) {
+            dateClock.setTextColor(theme.textPrimary);
+            dateClock.setBackground(null);
+        }
+        if (greeting != null && !festive) greeting.setTextColor(theme.textSecondary);
+        if (prayerCard != null) prayerCard.setBackground(ThemeDrawables.card(theme, density));
+        if (weatherCard != null) weatherCard.setBackground(ThemeDrawables.card(theme, density));
+        if (prayerTitle != null) prayerTitle.setTextColor(theme.textSecondary);
+        if (weatherTitle != null) weatherTitle.setTextColor(theme.textSecondary);
+        if (weatherTemp != null) weatherTemp.setTextColor(theme.textPrimary);
+        if (prayerCountdown != null) prayerCountdown.setTextColor(theme.accent);
+        android.content.res.ColorStateList pillText = ThemeDrawables.pillText(theme);
+        for (View pill : new View[]{btnInputs, btnWifi, btnReorder, btnLibraryTop, btnThemes,
+                findViewById(R.id.btnSettings)}) {
+            if (pill == null) continue;
+            pill.setBackground(ThemeDrawables.pill(theme, density));
+            if (pill instanceof TextView) {
+                TextView tv = (TextView) pill;
+                tv.setTextColor(pillText);
+                tv.setCompoundDrawableTintList(pillText);
+            }
+        }
+        if (glass != null && !festive && !reordering) glass.setAccent(theme.accent);
+        if (dockDecoration != null) {
+            dockDecoration.setPalette(theme.dockBand, theme.dockEdge);
+            if (grid != null) grid.invalidateItemDecorations();
+        }
+        if (adapter != null) adapter.setIconPresentation(theme, iconStyle);
+    }
+
     // ---- reorder ---------------------------------------------------------------------------------
 
     /** Blue the glass turns while reorder mode is on. */
@@ -890,6 +1078,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (handleSettingsKey(event)) return true;
+        if (handleAppKey(event)) return true;
         if (!reordering) return super.dispatchKeyEvent(event);
         if (dockEditing) return dispatchDockEdit(event);
         boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
@@ -1061,12 +1250,25 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         drop();
         reordering = false;
         adapter.setReordering(false);
-        glass.setAccent(festive ? festival.accentColor() : 0);
+        glass.setAccent(festive ? festival.accentColor() : visualTheme.accent);
         btnReorder.setActivated(false);
         List<String> keys = adapter.movableKeys();
         List<String> before = orderAtStart;
         orderAtStart = null;
         if (!keys.equals(before)) {
+            // First dock row packages become the saved dock bar.
+            List<String> newDock = new ArrayList<>();
+            for (String key : keys) {
+                String pkg = pkgFromKey(key);
+                if (pkg == null || pkg.isEmpty() || newDock.contains(pkg)) continue;
+                newDock.add(pkg);
+                if (newDock.size() >= COLUMNS) break;
+            }
+            if (!newDock.isEmpty()) {
+                dockApps = newDock;
+                adapter.setFavourites(dockApps);
+                DockPrefs.save(this, dockApps);
+            }
             Order order = new Order(Order.dockKey(dockApps), keys);
             if (Order.save(Order.file(this), order)) {
                 adapter.setSavedOrder(Order.ranks(order, dockApps));
@@ -1075,6 +1277,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         }
         if (fillDockLeavesSlots) reloadTiles();   // the empty dock slots left out while reordering come back
+    }
+
+    /** Component key → package name (keys are flattened ComponentName strings). */
+    private static String pkgFromKey(String key) {
+        if (key == null) return null;
+        int slash = key.indexOf('/');
+        return slash > 0 ? key.substring(0, slash) : key;
     }
 
     /**
@@ -1145,6 +1354,144 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     // ---- glass highlight -------------------------------------------------------------------------
 
     @Override
+    public boolean onDockLongPress(int position, String pkg, String label) {
+        showDockMenu(position, pkg, label);
+        return true;
+    }
+
+    /**
+     * Hold OK on a dock app: rearrange, replace, remove, or add apps to the bar.
+     * (Short press still opens the app.)
+     */
+    private void showDockMenu(int position, String pkg, String label) {
+        if (reordering || dockEditing) return;
+        View panel = getLayoutInflater().inflate(R.layout.popup_scroll_list, root, false);
+        ((TextView) panel.findViewById(R.id.listTitle)).setText("Dock · " + label);
+        ScrollView scroll = panel.findViewById(R.id.listScroll);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        // Full list, wrap height — avoid the clipped single-row look.
+        ViewGroup.LayoutParams lp = scroll.getLayoutParams();
+        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+        scroll.setLayoutParams(lp);
+        scroll.setFillViewport(false);
+
+        final PopupWindow popup = glassPopup(panel, (int) (340 * density));
+
+        addDockMenuRow(rows, "Move left", () -> {
+            popup.dismiss();
+            moveDockSlot(position, -1);
+        });
+        addDockMenuRow(rows, "Move right", () -> {
+            popup.dismiss();
+            moveDockSlot(position, +1);
+        });
+        addDockMenuRow(rows, "Replace with another app…", () -> {
+            popup.dismiss();
+            startDockEditAt(position);
+        });
+        addDockMenuRow(rows, "Add app to dock…", () -> {
+            popup.dismiss();
+            startDockEditAt(Math.min(position + 1, COLUMNS - 1));
+        });
+        if (dockApps.size() > 1) {
+            addDockMenuRow(rows, "Remove from dock", () -> {
+                popup.dismiss();
+                removeFromDock(pkg);
+            });
+        }
+        addDockMenuRow(rows, "Edit whole dock…", () -> {
+            popup.dismiss();
+            startDockEdit();
+        });
+        addDockMenuRow(rows, "App info", () -> {
+            popup.dismiss();
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(i);
+            } catch (ActivityNotFoundException ignored) {
+            }
+        });
+
+        int widthSpec = View.MeasureSpec.makeMeasureSpec((int) (340 * density), View.MeasureSpec.EXACTLY);
+        panel.measure(widthSpec, View.MeasureSpec.UNSPECIFIED);
+        popup.setWidth((int) (340 * density));
+        popup.setHeight(panel.getMeasuredHeight());
+
+        View anchor = grid.findFocus();
+        if (anchor == null) anchor = grid;
+        // Dock sits at the bottom: open the menu above the tile so every row stays on screen.
+        int yOff = -(panel.getMeasuredHeight() + (int) (12 * density));
+        panel.setAlpha(0f);
+        panel.setPivotY(panel.getMeasuredHeight());
+        panel.setScaleY(0.94f);
+        popup.showAsDropDown(anchor, 0, yOff, Gravity.CENTER_HORIZONTAL);
+        panel.animate().alpha(1f).scaleY(1f).setDuration(200)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+        if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+    }
+
+    /** Dock hold-menu row: gold focus ring + always-white label (readable on dark glass). */
+    private void addDockMenuRow(LinearLayout rows, String title, Runnable action) {
+        View row = getLayoutInflater().inflate(R.layout.item_dock_menu, rows, false);
+        ((TextView) row.findViewById(R.id.title)).setText(title);
+        row.setOnClickListener(v -> action.run());
+        final boolean[] pressed = {false};
+        row.setOnKeyListener((v, code, event) -> {
+            if (code != KeyEvent.KEYCODE_DPAD_CENTER && code != KeyEvent.KEYCODE_ENTER) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) pressed[0] = true;
+                return true;
+            }
+            boolean activate = pressed[0];
+            pressed[0] = false;
+            if (activate) action.run();
+            return true;
+        });
+        rows.addView(row);
+    }
+
+    private void moveDockSlot(int from, int delta) {
+        int to = from + delta;
+        if (from < 0 || to < 0 || from >= dockApps.size() || to >= dockApps.size()) return;
+        List<String> next = new ArrayList<>(dockApps);
+        Collections.swap(next, from, to);
+        applyDockApps(next);
+        focusTile(to);
+    }
+
+    private void removeFromDock(String pkg) {
+        if (dockApps.size() <= 1) return;
+        List<String> next = new ArrayList<>(dockApps);
+        next.remove(pkg);
+        applyDockApps(next);
+        Toast.makeText(this, "Removed from dock", Toast.LENGTH_SHORT).show();
+    }
+
+    private void applyDockApps(List<String> next) {
+        dockApps = new ArrayList<>(next);
+        adapter.setFavourites(dockApps);
+        DockPrefs.save(this, dockApps);
+        // Invalidate saved tile order against the new dock fingerprint so the bar matches.
+        Order order = new Order(Order.dockKey(dockApps), Collections.emptyList());
+        Order.save(Order.file(this), order);
+        adapter.setSavedOrder(Order.ranks(order, dockApps));
+        reloadTiles();
+    }
+
+    /** Edit-dock mode starting on a chosen slot (replace / add). */
+    private void startDockEditAt(int slot) {
+        if (reordering) endReorder();
+        if (!beginReorder()) return;
+        dockEditing = true;
+        dockEditSlot = Math.max(0, Math.min(slot, COLUMNS - 1));
+        dimOthers();
+        int n = adapter.movableCount();
+        focusTile(Math.min(COLUMNS, Math.max(0, n - 1)));
+        Toast.makeText(this, R.string.dock_edit_pick_app, Toast.LENGTH_LONG).show();
+    }
+
+    @Override
     public void onLibraryRequested() {
         if (appLibrary != null) appLibrary.close();
         if (openPopup != null) openPopup.dismiss();
@@ -1201,9 +1548,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         glassCardW = card.getWidth();
         glassTargetX = x;
         glassTargetY = y;
-        // Cinematic shelf: the highlight glows in the dock app's colour, plain white in the grid.
-        int accent = cinematic && !festive && position < COLUMNS ? adapter.ambientColorAt(position) : 0;
-        if (cinematic && !festive && accent != glassAccent) {
+        // Cinematic shelf: dock app colour; otherwise the active visual theme accent.
+        int accent = festive ? festival.accentColor()
+                : (cinematic && position < COLUMNS ? adapter.ambientColorAt(position) : visualTheme.accent);
+        if (accent == 0) accent = visualTheme.accent;
+        if (accent != glassAccent) {
             glassAccent = accent;
             glass.setAccent(accent);
         }
@@ -1907,9 +2256,186 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         handler.removeCallbacks(clockCheck);
         if (valid) {
             updateGreeting();
+            updateJordanStrip();
         } else {
             handler.postDelayed(clockCheck, 1_000L);
         }
+    }
+
+    /** Prayer + weather glass cards under the clock (Jordan). */
+    private void updateJordanStrip() {
+        if (prayerCountdown == null || prayerSlotTimes == null || jordanPrefs == null) return;
+        JordanPrefs.City prayerCity = jordanPrefs.prayerCity();
+        JordanPrefs.Method method = jordanPrefs.method();
+        JordanPrefs.City weatherCity = jordanPrefs.weatherCity();
+        prayerTitle.setText("☾  PRAYER · " + prayerCity.label.toUpperCase(Locale.US));
+        weatherTitle.setText("☁  WEATHER · " + weatherCity.label.toUpperCase(Locale.US));
+        try {
+            Calendar now = Calendar.getInstance();
+            PrayerTimes times = PrayerTimes.forToday(prayerCity, method);
+            int nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
+            int next = times.nextIndex(nowMin);
+            prayerCountdown.setText(times.formatCountdown(now));
+            for (int s = 0; s < PrayerTimes.CARD_INDICES.length; s++) {
+                int idx = PrayerTimes.CARD_INDICES[s];
+                boolean highlight = idx == next;
+                prayerSlotTimes[s].setText(PrayerTimes.hm(times.minutes[idx]));
+                prayerSlotLabels[s].setText(times.names[idx]);
+                prayerSlotTimes[s].setTextColor(highlight ? prayerAccent : PRAYER_TIME);
+                prayerSlotLabels[s].setTextColor(highlight ? prayerAccent : PRAYER_LABEL);
+            }
+        } catch (Exception ignored) {
+            prayerCountdown.setText("—");
+        }
+        if (weatherAmman != null && weatherTemp != null) {
+            weatherAmman.refresh(weatherCity, snap -> {
+                if (isFinishing() || weatherTemp == null) return;
+                weatherTemp.setText(snap.tempLabel);
+                weatherDesc.setText(snap.description);
+            });
+        }
+    }
+
+    /** Form dialog: location list + calculation method list, both scrollable with D-pad. */
+    private void showPrayerSettings() {
+        View panel = getLayoutInflater().inflate(R.layout.dialog_prayer_form, root, false);
+        final ScrollView cityScroll = panel.findViewById(R.id.cityScroll);
+        final ScrollView methodScroll = panel.findViewById(R.id.methodScroll);
+        final LinearLayout cityRows = panel.findViewById(R.id.cityRows);
+        final LinearLayout methodRows = panel.findViewById(R.id.methodRows);
+
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(panel);
+        dialog.setCanceledOnTouchOutside(true);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            w.setLayout((int) (560 * density), ViewGroup.LayoutParams.WRAP_CONTENT);
+            w.setDimAmount(0.55f);
+        }
+
+        final String[] selectedCity = {jordanPrefs.prayerCity().id};
+        final String[] selectedMethod = {jordanPrefs.method().id};
+
+        Runnable refreshCities = () -> {
+            cityRows.removeAllViews();
+            for (JordanPrefs.City city : JordanPrefs.CITIES) {
+                final JordanPrefs.City c = city;
+                addFormChoiceRow(cityRows, cityScroll, city.label, city.id.equals(selectedCity[0]), () -> {
+                    selectedCity[0] = c.id;
+                    jordanPrefs.setPrayerCity(c.id);
+                    updateJordanStrip();
+                    // Refresh dots without closing — user can still pick a method.
+                    for (int i = 0; i < cityRows.getChildCount(); i++) {
+                        View row = cityRows.getChildAt(i);
+                        TextView status = row.findViewById(R.id.status);
+                        boolean on = ((String) row.getTag()).equals(selectedCity[0]);
+                        status.setVisibility(on ? View.VISIBLE : View.GONE);
+                        if (on) {
+                            status.setText("●");
+                            status.setTextColor(prayerAccent);
+                        }
+                    }
+                }, c.id);
+            }
+        };
+        Runnable refreshMethods = () -> {
+            methodRows.removeAllViews();
+            for (JordanPrefs.Method method : JordanPrefs.METHODS) {
+                final JordanPrefs.Method m = method;
+                addFormChoiceRow(methodRows, methodScroll, method.label, method.id.equals(selectedMethod[0]), () -> {
+                    selectedMethod[0] = m.id;
+                    jordanPrefs.setMethod(m.id);
+                    updateJordanStrip();
+                    for (int i = 0; i < methodRows.getChildCount(); i++) {
+                        View row = methodRows.getChildAt(i);
+                        TextView status = row.findViewById(R.id.status);
+                        boolean on = ((String) row.getTag()).equals(selectedMethod[0]);
+                        status.setVisibility(on ? View.VISIBLE : View.GONE);
+                        if (on) {
+                            status.setText("●");
+                            status.setTextColor(prayerAccent);
+                        }
+                    }
+                }, m.id);
+            }
+        };
+        refreshCities.run();
+        refreshMethods.run();
+
+        dialog.setOnDismissListener(d -> {
+            if (prayerCard != null) prayerCard.requestFocus();
+        });
+        dialog.show();
+        if (cityRows.getChildCount() > 0) cityRows.getChildAt(0).requestFocus();
+    }
+
+    private void showWeatherCityPicker() {
+        View panel = getLayoutInflater().inflate(R.layout.popup_scroll_list, root, false);
+        ((TextView) panel.findViewById(R.id.listTitle)).setText("Weather location");
+        final ScrollView scroll = panel.findViewById(R.id.listScroll);
+        final LinearLayout rows = panel.findViewById(R.id.rows);
+        PopupWindow popup = glassPopup(panel, (int) (300 * density));
+        popup.setHeight((int) (340 * density));
+
+        String selected = jordanPrefs.weatherCity().id;
+        for (JordanPrefs.City city : JordanPrefs.CITIES) {
+            final JordanPrefs.City c = city;
+            addFormChoiceRow(rows, scroll, city.label, city.id.equals(selected), () -> {
+                jordanPrefs.setWeatherCity(c.id);
+                updateJordanStrip();
+                popup.dismiss();
+            }, c.id);
+        }
+        dropIn(popup, panel, weatherCard, Gravity.END);
+        if (rows.getChildCount() > 0) rows.getChildAt(0).requestFocus();
+    }
+
+    /**
+     * Choice row for widget forms. Scrolls the parent ScrollView when focused so D-pad never
+     * "loses" the cursor off-screen.
+     */
+    private void addFormChoiceRow(LinearLayout rows, ScrollView scroll, String title,
+                                  boolean selected, Runnable action, String tag) {
+        View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        row.setTag(tag);
+        row.findViewById(R.id.icon).setVisibility(View.GONE);
+        row.findViewById(R.id.dot).setVisibility(View.GONE);
+        TextView status = row.findViewById(R.id.status);
+        if (selected) {
+            status.setVisibility(View.VISIBLE);
+            status.setText("●");
+            status.setTextColor(prayerAccent);
+        } else {
+            status.setVisibility(View.GONE);
+        }
+        ((TextView) row.findViewById(R.id.title)).setText(title);
+        row.setOnClickListener(v -> action.run());
+        final boolean[] pressed = {false};
+        row.setOnKeyListener((v, code, event) -> {
+            if (code != KeyEvent.KEYCODE_DPAD_CENTER && code != KeyEvent.KEYCODE_ENTER) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) pressed[0] = true;
+                return true;
+            }
+            boolean activate = pressed[0];
+            pressed[0] = false;
+            if (activate) action.run();
+            return true;
+        });
+        row.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus || scroll == null) return;
+            scroll.post(() -> {
+                Rect r = new Rect();
+                v.getDrawingRect(r);
+                scroll.offsetDescendantRectToMyCoords(v, r);
+                int target = r.top - (int) (12 * density);
+                if (target < 0) target = 0;
+                scroll.smoothScrollTo(0, target);
+            });
+        });
+        rows.addView(row);
     }
 
     private void updateGreeting() {
@@ -1930,6 +2456,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             greeting.setTextColor(greetingColor);
         }
         if (shamsi) shamsiDate.setText(Shamsi.today());
+        updateArabicWeekday();
+    }
+
+    /** Arabic weekday next to the clock (calligraphy-style, no pill). */
+    private void updateArabicWeekday() {
+        if (dateClock == null) return;
+        // Calendar.SUNDAY=1 … SATURDAY=7
+        final String[] days = {
+                "", "الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"
+        };
+        int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
+        if (dow < 1 || dow > 7) return;
+        dateClock.setText(days[dow]);
     }
 
     // ---- race-weekend panel (a theme's race_calendar) -----------------------------------------------

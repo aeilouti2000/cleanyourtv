@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="1"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp">
+
+    <TextView
+        android:id="@+id/slotTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="@font/outfit_light"
+        android:includeFontPadding="false"
+        android:letterSpacing="-0.02"
+        android:textColor="#FFFFFFFF"
+        android:textSize="22sp" />
+
+    <TextView
+        android:id="@+id/slotLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center_horizontal"
+        android:fontFamily="@font/outfit_medium"
+        android:includeFontPadding="false"
+        android:letterSpacing="0.04"
+        android:singleLine="true"
+        android:ellipsize="none"
+        android:textAllCaps="true"
+        android:textColor="#8CFFFFFF"
+        android:textSize="10sp" />
+</LinearLayout>

@@ -5,6 +5,13 @@
     android:layout_height="match_parent"
     android:background="#FF000000">
 
+    <!-- Visual theme backdrop (gradients / aurora accents). Drawn under the sky when sky is off. -->
+    <com.gathin.tvhome.ThemeBackdropView
+        android:id="@+id/themeBackdrop"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no" />
+
     <!-- Time-of-day backdrop, drawn once a minute (config.xml sky_intensity; 0 keeps it hidden). -->
     <com.gathin.tvhome.SkyView
         android:id="@+id/sky"
@@ -152,7 +159,7 @@
         android:orientation="vertical"
         android:paddingStart="56dp"
         android:paddingEnd="56dp"
-        android:paddingTop="26dp"
+        android:paddingTop="12dp"
         android:clipChildren="false"
         android:clipToPadding="false">
 
@@ -165,12 +172,13 @@
 
             <LinearLayout
                 android:id="@+id/leftBlock"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_alignParentStart="true"
-                android:layout_toStartOf="@+id/topButtons"
-                android:layout_marginEnd="16dp"
-                android:orientation="vertical">
+                android:layout_marginTop="36dp"
+                android:orientation="vertical"
+                android:clipChildren="false"
+                android:clipToPadding="false">
 
                 <!-- The header texts use gravity left, not start: the launcher lays out left to right
                      (no supportsRtl), and with start a right-to-left script such as Arabic would move to the
@@ -190,10 +198,13 @@
                     android:textAllCaps="true" />
 
                 <LinearLayout
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:baselineAligned="true">
+                    android:gravity="center_vertical"
+                    android:baselineAligned="false"
+                    android:clipChildren="false"
+                    android:clipToPadding="false">
 
                     <TextClock
                         android:id="@+id/clock"
@@ -202,48 +213,42 @@
                         android:format12Hour="h:mm"
                         android:format24Hour="HH:mm"
                         android:textColor="#FFFFFFFF"
-                        android:textSize="52sp"
-                        android:fontFamily="@font/outfit_light"
-                        android:letterSpacing="-0.04"
+                        android:textSize="56sp"
+                        android:fontFamily="@font/outfit_medium"
+                        android:letterSpacing="-0.03"
                         android:includeFontPadding="false" />
 
                     <TextClock
                         android:id="@+id/ampm"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
+                        android:layout_marginStart="8dp"
                         android:layout_gravity="bottom"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="10dp"
                         android:format12Hour="a"
                         android:format24Hour=""
-                        android:textColor="#B3FFFFFF"
-                        android:textSize="15sp"
+                        android:textColor="#FFE8A54B"
+                        android:textSize="14sp"
                         android:fontFamily="@font/outfit_medium"
-                        android:letterSpacing="0.08"
-                        android:textAllCaps="true" />
-
-                    <View
-                        android:layout_width="1dp"
-                        android:layout_height="26dp"
-                        android:layout_gravity="bottom"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginEnd="16dp"
-                        android:layout_marginBottom="8dp"
-                        android:background="#33FFFFFF" />
+                        android:letterSpacing="0.06"
+                        android:textAllCaps="true"
+                        android:includeFontPadding="false" />
 
                     <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_weight="1"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_gravity="bottom"
-                        android:layout_marginBottom="9dp"
-                        android:orientation="vertical">
+                        android:layout_gravity="center_vertical"
+                        android:layout_marginStart="40dp"
+                        android:orientation="vertical"
+                        android:gravity="center_vertical"
+                        android:clipChildren="false"
+                        android:clipToPadding="false">
 
                         <!-- Shamsi date ("27 Mehr 1405"), shown when shamsi_date is on. -->
                         <TextView
                             android:id="@+id/shamsiDate"
                             android:gravity="left"
-                            android:layout_width="match_parent"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:singleLine="true"
                             android:ellipsize="end"
@@ -254,22 +259,27 @@
                             android:includeFontPadding="false"
                             android:visibility="gone" />
 
-                        <TextClock
+                        <!-- Arabic weekday in calligraphy style (no pill). Extra start pad for Amiri overhang. -->
+                        <TextView
                             android:id="@+id/date"
-                            android:gravity="left"
-                            android:layout_width="match_parent"
+                            android:gravity="center"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:singleLine="@bool/date_single_line"
-                            android:maxLines="2"
-                            android:lineSpacingExtra="6dp"
-                            android:ellipsize="end"
-                            android:format12Hour="@string/date_format_home"
-                            android:format24Hour="@string/date_format_home"
-                            android:textColor="#A6FFFFFF"
-                            android:textSize="14sp"
-                            android:fontFamily="@font/outfit_regular"
-                            android:letterSpacing="0.14"
-                            android:textAllCaps="true" />
+                            android:paddingStart="20dp"
+                            android:paddingEnd="16dp"
+                            android:paddingTop="4dp"
+                            android:paddingBottom="4dp"
+                            android:singleLine="true"
+                            android:maxLines="1"
+                            android:ellipsize="none"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="64sp"
+                            android:fontFamily="@font/amiri"
+                            android:textFontWeight="700"
+                            android:includeFontPadding="false"
+                            android:lineSpacingMultiplier="0.85"
+                            android:textDirection="rtl"
+                            android:textAlignment="viewStart" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -294,13 +304,153 @@
                 android:focusable="false"
                 android:visibility="gone" />
 
+            <!-- Prayer + weather cards: full width under the header (uses space under the pills too). -->
+            <LinearLayout
+                android:id="@+id/jordanStrip"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/leftBlock"
+                android:layout_alignParentStart="true"
+                android:layout_alignParentEnd="true"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal"
+                android:focusable="false"
+                android:clipChildren="false"
+                android:clipToPadding="false">
+
+                <!-- Prayer card (OK = location + calculation method) -->
+                <LinearLayout
+                    android:id="@+id/prayerCard"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="3"
+                    android:background="@drawable/widget_card_bg"
+                    android:orientation="vertical"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="16dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true">
+
+                    <RelativeLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <TextView
+                            android:id="@+id/prayerTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_alignParentStart="true"
+                            android:layout_centerVertical="true"
+                            android:fontFamily="@font/outfit_medium"
+                            android:letterSpacing="0.14"
+                            android:text="☾  PRAYER · IRBID"
+                            android:textAllCaps="true"
+                            android:textColor="#B3FFFFFF"
+                            android:textSize="11sp" />
+
+                        <TextView
+                            android:id="@+id/prayerCountdown"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_alignParentEnd="true"
+                            android:layout_centerVertical="true"
+                            android:fontFamily="@font/outfit_medium"
+                            android:letterSpacing="0.04"
+                            android:textColor="#E8B86D"
+                            android:textSize="12sp" />
+                    </RelativeLayout>
+
+                    <LinearLayout
+                        android:id="@+id/prayerSlots"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:weightSum="5">
+
+                        <include
+                            android:id="@+id/slotFajr"
+                            layout="@layout/include_prayer_slot" />
+                        <include
+                            android:id="@+id/slotDhuhr"
+                            layout="@layout/include_prayer_slot" />
+                        <include
+                            android:id="@+id/slotAsr"
+                            layout="@layout/include_prayer_slot" />
+                        <include
+                            android:id="@+id/slotMaghrib"
+                            layout="@layout/include_prayer_slot" />
+                        <include
+                            android:id="@+id/slotIsha"
+                            layout="@layout/include_prayer_slot" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Weather card (OK = change city) -->
+                <LinearLayout
+                    android:id="@+id/weatherCard"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1.35"
+                    android:layout_marginStart="14dp"
+                    android:background="@drawable/widget_card_bg"
+                    android:orientation="vertical"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="16dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true">
+
+                    <TextView
+                        android:id="@+id/weatherTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/outfit_medium"
+                        android:letterSpacing="0.08"
+                        android:singleLine="true"
+                        android:text="☁  WEATHER · IRBID"
+                        android:textAllCaps="true"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/weatherTemp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:fontFamily="@font/outfit_light"
+                        android:includeFontPadding="false"
+                        android:letterSpacing="-0.03"
+                        android:text="—"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="36sp" />
+
+                    <TextView
+                        android:id="@+id/weatherDesc"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:ellipsize="end"
+                        android:fontFamily="@font/outfit_regular"
+                        android:letterSpacing="0.04"
+                        android:singleLine="true"
+                        android:textColor="#A6FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+
             <LinearLayout
                 android:id="@+id/topButtons"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_alignParentTop="true"
                 android:layout_alignParentEnd="true"
-                android:layout_alignBottom="@id/leftBlock"
-                android:layout_marginBottom="6dp"
                 android:clipChildren="false"
                 android:clipToPadding="false"
                 android:orientation="horizontal">
@@ -338,6 +488,13 @@
                     android:nextFocusDown="@+id/grid" />
 
                 <TextView
+                    android:id="@+id/btnThemes"
+                    style="@style/TopButton"
+                    android:text="@string/themes"
+                    android:drawableStart="@drawable/ic_theme"
+                    android:nextFocusDown="@+id/grid" />
+
+                <TextView
                     android:id="@+id/btnSettings"
                     style="@style/TopButton"
                     android:text="@string/settings"
@@ -358,7 +515,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:paddingTop="10dp"
-                android:paddingBottom="40dp"
+                android:paddingBottom="8dp"
                 android:clipToPadding="false"
                 android:clipChildren="false"
                 android:overScrollMode="never"
